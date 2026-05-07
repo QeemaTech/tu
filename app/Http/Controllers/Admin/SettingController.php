@@ -27,6 +27,10 @@ class SettingController extends Controller
             'referral_points' => 'nullable|numeric|min:0',
             'cache_back_points_rate' => 'nullable|numeric|min:0',
             'max_delivery_wallet' => 'nullable|numeric|min:0',
+            'voucher_trigger_amount' => 'nullable|numeric|min:0',
+            'voucher_discount_rate' => 'nullable|numeric|min:0|max:100',
+            'voucher_max_order_amount' => 'nullable|numeric|min:0',
+            'voucher_expiry_days' => 'nullable|integer|min:1',
         ]);
 
         try {
@@ -72,6 +76,22 @@ class SettingController extends Controller
                 ['value' => $request->max_delivery_wallet ?? 0, 'type' => 'number']
             );
             $this->updateCache('max_delivery_wallet', $setting->value);
+
+            // Update voucher settings
+            $voucherSettings = [
+                'voucher_trigger_amount' => 'number',
+                'voucher_discount_rate' => 'number',
+                'voucher_max_order_amount' => 'number',
+                'voucher_expiry_days' => 'number',
+            ];
+
+            foreach ($voucherSettings as $key => $type) {
+                $setting = Setting::updateOrCreate(
+                    ['key' => $key],
+                    ['value' => $request->$key ?? null, 'type' => $type]
+                );
+                $this->updateCache($key, $setting->value);
+            }
 
             // Handle app_logo upload
             if ($request->hasFile('app_logo')) {

@@ -116,6 +116,7 @@ class OrderController extends Controller
             // Inputs that fit the new server-side order cycle
             // Note: order_discount is now calculated automatically from product discounts
             'coupon_code' => ['nullable', 'string', 'exists:coupons,code'],
+            'voucher_code' => ['nullable', 'string', 'exists:vouchers,code'],
             // Boolean flags: if true, service will automatically calculate and use all available wallet/points
             'use_wallet' => ['nullable', 'boolean'],
             'use_points' => ['nullable', 'boolean'],

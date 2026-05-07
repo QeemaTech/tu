@@ -120,4 +120,34 @@ class CartController extends Controller
             ], 422);
         }
     }
+
+    public function applyVoucher(Request $request)
+    {
+        $request->validate([
+            'voucher_code' => ['required', 'string', 'exists:vouchers,code'],
+        ]);
+
+        $user = Auth::user();
+
+        try {
+            $result = $this->cartService->applyVoucher($user->id, $request->voucher_code);
+
+            return response()->json([
+                'success' => true,
+                'message' => __('Voucher applied successfully.'),
+                'data' => [
+                    'voucher' => new \App\Http\Resources\VoucherResource($result['voucher']),
+                    'cart_subtotal' => $result['subtotal'],
+                    'discount' => $result['discount'],
+                    'total' => max(0, $result['subtotal'] - $result['discount']),
+                ],
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+                'errors' => $e->errors(),
+            ], 422);
+        }
+    }
 }

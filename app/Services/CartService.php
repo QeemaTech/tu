@@ -94,6 +94,13 @@ class CartService
         }
 
         $cartSubtotal = $this->calculateCartSubtotal($userId);
+        $voucherMaxAmount = (float) setting('voucher_max_order_amount', 0);
+
+        if ($voucherMaxAmount > 0 && $cartSubtotal >= $voucherMaxAmount) {
+            throw ValidationException::withMessages([
+                'code' => [__('Coupons can only be used for orders with subtotal less than :amount.', ['amount' => $voucherMaxAmount])],
+            ]);
+        }
 
         if ($cartSubtotal < (float) $coupon->min_cart_amount) {
             throw ValidationException::withMessages([
@@ -116,6 +123,49 @@ class CartService
 
         return [
             'coupon' => $coupon,
+            'discount' => $discount,
+            'subtotal' => $cartSubtotal,
+        ];
+    }
+
+    /**
+     * Validate and calculate voucher discount for cart
+     *
+     * @return array{voucher: \App\Models\Voucher, discount: float, subtotal: float}
+     */
+    public function applyVoucher(int $userId, string $code): array
+    {
+        $user = User::findOrFail($userId);
+        $voucher = \App\Models\Voucher::where('code', $code)
+            ->where('user_id', $userId)
+            ->first();
+
+        if (! $voucher) {
+            throw ValidationException::withMessages([
+                'code' => [__('Voucher not found.')],
+            ]);
+        }
+
+        if (! $voucher->isValid()) {
+            throw ValidationException::withMessages([
+                'code' => [__('Voucher is invalid or already used.')],
+            ]);
+        }
+
+        $cartSubtotal = $this->calculateCartSubtotal($userId);
+        $voucherMaxAmount = (float) setting('voucher_max_order_amount', 0);
+
+        if ($voucherMaxAmount > 0 && round($cartSubtotal, 2) !== round($voucherMaxAmount, 2)) {
+            throw ValidationException::withMessages([
+                'code' => [__('Vouchers can only be used for orders with subtotal exactly equal to :amount.', ['amount' => $voucherMaxAmount])],
+            ]);
+        }
+
+        $discountRate = (float) ($voucher->discount_rate ?? setting('voucher_discount_rate', 0));
+        $discount = round(($cartSubtotal * $discountRate) / 100, 2);
+
+        return [
+            'voucher' => $voucher,
             'discount' => $discount,
             'subtotal' => $cartSubtotal,
         ];

@@ -22,6 +22,8 @@ class OrderResource extends JsonResource
             'sub_total' => $this->sub_total,
             'order_discount' => $this->order_discount,
             'coupon_discount' => $this->coupon_discount,
+            'voucher_id' => $this->voucher_id,
+            'voucher_discount' => $this->voucher_discount,
             'total_shipping' => $this->total_shipping,
             'points_discount' => $this->points_discount,
             'wallet_used' => $this->wallet_used,
