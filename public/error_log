@@ -1,0 +1,28 @@
+[24-Apr-2026 07:22:39 UTC] PHP Fatal error:  Uncaught RuntimeException: Composer detected issues in your platform: Your Composer dependencies require a PHP version ">= 8.3.0". You are running 8.2.30. in /home/backendpro/tu.backendpro.site/vendor/composer/platform_check.php:26
+Stack trace:
+#0 /home/backendpro/tu.backendpro.site/vendor/composer/autoload_real.php(25): require()
+#1 /home/backendpro/tu.backendpro.site/vendor/autoload.php(22): ComposerAutoloaderInit8e71125543d024b83aa123bcc2e4964e::getLoader()
+#2 /home/backendpro/tu.backendpro.site/public/index.php(14): require('/home/backendpr...')
+#3 {main}
+  thrown in /home/backendpro/tu.backendpro.site/vendor/composer/platform_check.php on line 26
+[24-Apr-2026 07:54:02 UTC] PHP Fatal error:  Uncaught RuntimeException: Composer detected issues in your platform: Your Composer dependencies require a PHP version ">= 8.3.0". You are running 8.2.30. in /home/backendpro/tu.backendpro.site/vendor/composer/platform_check.php:26
+Stack trace:
+#0 /home/backendpro/tu.backendpro.site/vendor/composer/autoload_real.php(25): require()
+#1 /home/backendpro/tu.backendpro.site/vendor/autoload.php(22): ComposerAutoloaderInit8e71125543d024b83aa123bcc2e4964e::getLoader()
+#2 /home/backendpro/tu.backendpro.site/public/index.php(14): require('/home/backendpr...')
+#3 {main}
+  thrown in /home/backendpro/tu.backendpro.site/vendor/composer/platform_check.php on line 26
+[25-Apr-2026 06:55:23 UTC] PHP Fatal error:  Uncaught RuntimeException: Composer detected issues in your platform: Your Composer dependencies require a PHP version ">= 8.3.0". You are running 8.2.30. in /home/backendpro/tu.backendpro.site/vendor/composer/platform_check.php:26
+Stack trace:
+#0 /home/backendpro/tu.backendpro.site/vendor/composer/autoload_real.php(25): require()
+#1 /home/backendpro/tu.backendpro.site/vendor/autoload.php(22): ComposerAutoloaderInit8e71125543d024b83aa123bcc2e4964e::getLoader()
+#2 /home/backendpro/tu.backendpro.site/public/index.php(14): require('/home/backendpr...')
+#3 {main}
+  thrown in /home/backendpro/tu.backendpro.site/vendor/composer/platform_check.php on line 26
+[25-Apr-2026 07:29:09 UTC] PHP Fatal error:  Uncaught RuntimeException: Composer detected issues in your platform: Your Composer dependencies require a PHP version ">= 8.3.0". You are running 8.2.30. in /home/backendpro/tu.backendpro.site/vendor/composer/platform_check.php:26
+Stack trace:
+#0 /home/backendpro/tu.backendpro.site/vendor/composer/autoload_real.php(25): require()
+#1 /home/backendpro/tu.backendpro.site/vendor/autoload.php(22): ComposerAutoloaderInit8e71125543d024b83aa123bcc2e4964e::getLoader()
+#2 /home/backendpro/tu.backendpro.site/public/index.php(14): require('/home/backendpr...')
+#3 {main}
+  thrown in /home/backendpro/tu.backendpro.site/vendor/composer/platform_check.php on line 26
