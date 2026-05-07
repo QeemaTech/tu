@@ -31,6 +31,8 @@ class Order extends Model
         'refunded_total',
         'paid_at',
         'vendor_balance_processed_at',
+        'voucher_id',
+        'voucher_discount',
     ];
 
     protected $casts = [
@@ -45,6 +47,7 @@ class Order extends Model
         'refunded_total' => 'decimal:2',
         'paid_at' => 'datetime',
         'vendor_balance_processed_at' => 'datetime',
+        'voucher_discount' => 'decimal:2',
     ];
 
     public function user()
@@ -60,6 +63,11 @@ class Order extends Model
     public function address()
     {
         return $this->belongsTo(Address::class);
+    }
+
+    public function voucher()
+    {
+        return $this->belongsTo(Voucher::class);
     }
 
     public function vendorOrders()

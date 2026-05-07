@@ -622,42 +622,90 @@ class OrderService
             // Calculate total product discount
             $productDiscount = round($originalTotal - $orderSubTotal, 2);
 
-            // 3. Apply Coupons
+            // 3. Apply Vouchers / Coupons (Mutually Exclusive based on subtotal)
+            $voucherMaxAmount = (float) setting('voucher_max_order_amount', 0);
+            $isVoucherOnly = $voucherMaxAmount > 0 && round($orderSubTotal, 2) === round($voucherMaxAmount, 2);
+            $isCouponOnly = $voucherMaxAmount > 0 && $orderSubTotal < $voucherMaxAmount;
+
             $coupon = null;
             $couponDiscount = 0.0;
-            if (! empty($data['coupon_id'])) {
-                $coupon = Coupon::query()->find($data['coupon_id']);
+            $voucher = null;
+            $voucherDiscount = 0.0;
 
-                if (! $coupon || ! $coupon->isValid()) {
+            if ($isVoucherOnly) {
+                if (! empty($data['coupon_id'])) {
                     throw ValidationException::withMessages([
-                        'coupon_id' => [__('Coupon is invalid or expired.')],
+                        'coupon_id' => [__('Coupons cannot be used for this order amount. Please use a voucher.')],
                     ]);
                 }
 
-                if ($orderSubTotal < (float) $coupon->min_cart_amount) {
+                if (! empty($data['voucher_code'])) {
+                    $voucher = \App\Models\Voucher::where('code', $data['voucher_code'])
+                        ->where('user_id', $userId)
+                        ->first();
+
+                    if (! $voucher || ! $voucher->isValid()) {
+                        throw ValidationException::withMessages([
+                            'voucher_code' => [__('Voucher is invalid or already used.')],
+                        ]);
+                    }
+
+                    $discountRate = (float) ($voucher->discount_rate ?? setting('voucher_discount_rate', 0));
+                    $voucherDiscount = round(($orderSubTotal * $discountRate) / 100, 2);
+                }
+            } elseif ($isCouponOnly) {
+                if (! empty($data['voucher_code'])) {
                     throw ValidationException::withMessages([
-                        'coupon_id' => [__('Cart total does not meet the minimum amount for this coupon.')],
+                        'voucher_code' => [__('Vouchers cannot be used for this order amount. Please use a coupon.')],
                     ]);
                 }
 
-                if ($coupon->usage_limit_per_user !== null && ! $coupon->isUsableByUser($user)) {
-                    throw ValidationException::withMessages([
-                        'coupon_id' => [__('Coupon usage limit reached.')],
-                    ]);
-                }
+                if (! empty($data['coupon_id'])) {
+                    $coupon = Coupon::query()->find($data['coupon_id']);
+                    // ... existing coupon validation ...
+                    if (! $coupon || ! $coupon->isValid()) {
+                        throw ValidationException::withMessages([
+                            'coupon_id' => [__('Coupon is invalid or expired.')],
+                        ]);
+                    }
 
-                if ($coupon->type === 'percentage') {
-                    $couponDiscount = round(($orderSubTotal * (float) $coupon->discount_value) / 100, 2);
-                } else {
-                    $couponDiscount = min((float) $coupon->discount_value, $orderSubTotal);
+                    if ($orderSubTotal < (float) $coupon->min_cart_amount) {
+                        throw ValidationException::withMessages([
+                            'coupon_id' => [__('Cart total does not meet the minimum amount for this coupon.')],
+                        ]);
+                    }
+
+                    if ($coupon->usage_limit_per_user !== null && ! $coupon->isUsableByUser($user)) {
+                        throw ValidationException::withMessages([
+                            'coupon_id' => [__('Coupon usage limit reached.')],
+                        ]);
+                    }
+
+                    if ($coupon->type === 'percentage') {
+                        $couponDiscount = round(($orderSubTotal * (float) $coupon->discount_value) / 100, 2);
+                    } else {
+                        $couponDiscount = min((float) $coupon->discount_value, $orderSubTotal);
+                    }
+                }
+            } else {
+                // subtotal > max_amount or max_amount not set
+                if (! empty($data['coupon_id']) || ! empty($data['voucher_code'])) {
+                    $msg = $voucherMaxAmount > 0
+                        ? __('Coupons/Vouchers cannot be used for this order amount.')
+                        : __('Coupons/Vouchers are currently unavailable.');
+                    throw ValidationException::withMessages([
+                        'cart' => [$msg],
+                    ]);
                 }
             }
 
-            // Distribute coupon discount across vendors proportionally
-            if ($couponDiscount > 0 && $orderSubTotal > 0) {
+            $totalDiscount = $couponDiscount + $voucherDiscount;
+
+            // Distribute combined discount across vendors proportionally
+            if ($totalDiscount > 0 && $orderSubTotal > 0) {
                 foreach ($vendorData as $vendorId => $vData) {
                     $ratio = $vData['subtotal'] / $orderSubTotal;
-                    $vendorData[$vendorId]['discount'] = round($couponDiscount * $ratio, 2);
+                    $vendorData[$vendorId]['discount'] = round($totalDiscount * $ratio, 2);
                 }
             }
 
@@ -692,7 +740,7 @@ class OrderService
             // order_discount now stores the total product discount amount
             $orderDiscount = $productDiscount;
 
-            $totalBeforeWalletPoints = round($orderSubTotal - $orderDiscount - $couponDiscount + $totalShipping, 2);
+            $totalBeforeWalletPoints = round($orderSubTotal - $orderDiscount - $totalDiscount + $totalShipping, 2);
             if ($totalBeforeWalletPoints < 0) {
                 $totalBeforeWalletPoints = 0.0;
             }
@@ -724,6 +772,8 @@ class OrderService
                 'order_discount' => $orderDiscount,
                 'coupon_id' => $coupon?->id,
                 'coupon_discount' => $couponDiscount,
+                'voucher_id' => $voucher?->id,
+                'voucher_discount' => $voucherDiscount,
                 'total_shipping' => $totalShipping,
                 'points_discount' => $pointsUsed,
                 'wallet_used' => $walletUsed,
@@ -816,26 +866,49 @@ class OrderService
                     'notes' => 'Order #'.$order->id,
                 ]);
             } else {
-                // If user didn't use points, add cashback points based on order total
-                if (! $usePoints) {
-                    $cashbackRate = (float) setting('cache_back_points_rate', 0);
-                    if ($cashbackRate > 0) {
-                        // Calculate cashback points: (order total * rate) / 100
-                        $cashbackPoints = round(($totalBeforeWalletPoints * $cashbackRate) / 100, 0);
-                        if ($cashbackPoints > 0) {
-                            $user->points = round((float) $user->points + $cashbackPoints, 2);
-                            $user->save();
+                // Reward exclusivity: Voucher (if >= trigger) OR Points (if < trigger)
+                $voucherTrigger = (float) setting('voucher_trigger_amount', 0);
 
-                            PointTransaction::create([
-                                'user_id' => $userId,
-                                'type' => 'addition',
-                                'amount' => (int) $cashbackPoints,
-                                'balance_after' => (int) round($user->points),
-                                'notes' => 'Cashback for Order #'.$order->id,
-                            ]);
+                if ($voucherTrigger > 0 && $totalBeforeWalletPoints >= $voucherTrigger) {
+                    // Award Voucher
+                    $expiryDays = setting('voucher_expiry_days');
+                    \App\Models\Voucher::create([
+                        'user_id' => $userId,
+                        'order_id' => $order->id,
+                        'code' => \App\Models\Voucher::generateUniqueCode(),
+                        'discount_rate' => (float) setting('voucher_discount_rate', 0),
+                        'max_order_amount' => (float) setting('voucher_max_order_amount', 0),
+                        'expires_at' => $expiryDays ? now()->addDays($expiryDays) : null,
+                    ]);
+                } else {
+                    // Award Points (if user didn't use points for payment)
+                    if (! $usePoints) {
+                        $cashbackRate = (float) setting('cache_back_points_rate', 0);
+                        if ($cashbackRate > 0) {
+                            $cashbackPoints = round(($totalBeforeWalletPoints * $cashbackRate) / 100, 0);
+                            if ($cashbackPoints > 0) {
+                                $user->points = round((float) $user->points + $cashbackPoints, 2);
+                                $user->save();
+
+                                PointTransaction::create([
+                                    'user_id' => $userId,
+                                    'type' => 'addition',
+                                    'amount' => (int) $cashbackPoints,
+                                    'balance_after' => (int) round($user->points),
+                                    'notes' => 'Cashback for Order #'.$order->id,
+                                ]);
+                            }
                         }
                     }
                 }
+            }
+
+            // 11.5 Mark voucher as used
+            if ($voucher) {
+                $voucher->update([
+                    'is_used' => true,
+                    'used_at' => now(),
+                ]);
             }
 
             // 13. Clear Cart

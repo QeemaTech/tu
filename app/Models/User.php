@@ -188,4 +188,9 @@ class User extends Authenticatable
     {
         return $this->hasMany(DeliveryRequest::class);
     }
+
+    public function vouchers()
+    {
+        return $this->hasMany(Voucher::class);
+    }
 }

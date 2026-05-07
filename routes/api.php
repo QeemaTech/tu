@@ -109,17 +109,25 @@ Route::group(['middleware' => 'locale'], function () {
 
         // cart with rate limiting
         Route::get('cart', [CartController::class, 'index']);
+        Route::post('cart/apply-coupon', [CartController::class, 'applyCoupon'])
+            ->middleware('throttle:10,1')
+            ->name('api.cart.apply-coupon');
+        Route::post('cart/apply-voucher', [CartController::class, 'applyVoucher'])
+            ->middleware('throttle:10,1')
+            ->name('api.cart.apply-voucher');
+        Route::delete('cart', [CartController::class, 'clear'])
+            ->middleware('throttle:10,1');
+
         Route::post('cart/{product}', [CartController::class, 'add'])
             ->middleware('throttle:30,1');
         Route::put('cart/{product}', [CartController::class, 'updateQuantity'])
             ->middleware('throttle:30,1');
         Route::delete('cart/{product}', [CartController::class, 'remove'])
             ->middleware('throttle:30,1');
-        Route::delete('cart', [CartController::class, 'clear'])
-            ->middleware('throttle:10,1');
-        Route::post('cart/apply-coupon', [CartController::class, 'applyCoupon'])
-            ->middleware('throttle:10,1')
-            ->name('api.cart.apply-coupon');
+
+        // Vouchers (user)
+        // Route::get('vouchers', [\App\Http\Controllers\Api\VoucherController::class, 'index'])->name('api.vouchers.index');
+        Route::get('vouchers', [\App\Http\Controllers\Api\VoucherController::class, 'active'])->name('api.vouchers.active');
 
         // orders (user) with rate limiting
         Route::apiResource('orders', OrderController::class)->only(['index', 'show']);

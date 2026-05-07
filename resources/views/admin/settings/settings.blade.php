@@ -195,6 +195,41 @@
                                 placeholder="0">
                             <small class="form-text text-muted">{{ __('Maximum wallet balance a delivery driver can have. If exceeded, they cannot receive new orders until admin decreases their wallet (e.g. after bank transfer). Use 0 for no limit.') }}</small>
                         </div>
+
+                        <hr>
+                        <h4 class="h5 mb-3">{{ __('Voucher Settings') }}</h4>
+
+                        {{-- Voucher Trigger Amount (number) --}}
+                        <div class="form-group mb-3">
+                            <label for="voucher_trigger_amount">{{ __('Voucher Trigger Amount') }}</label>
+                            <input type="number" class="form-control" id="voucher_trigger_amount" name="voucher_trigger_amount"
+                                value="{{ setting('voucher_trigger_amount', '0') }}" min="0" step="0.01">
+                            <small class="form-text text-muted">{{ __('Order total required for user to gain a voucher. If order total is less than this, user gets cashback points instead.') }}</small>
+                        </div>
+
+                        {{-- Voucher Discount Rate (number) --}}
+                        <div class="form-group mb-3">
+                            <label for="voucher_discount_rate">{{ __('Voucher Discount Rate (%)') }}</label>
+                            <input type="number" class="form-control" id="voucher_discount_rate" name="voucher_discount_rate"
+                                value="{{ setting('voucher_discount_rate', '0') }}" min="0" max="100" step="0.01">
+                            <small class="form-text text-muted">{{ __('Percentage discount provided by the voucher.') }}</small>
+                        </div>
+
+                        {{-- Voucher Max Order Amount (number) --}}
+                        <div class="form-group mb-3">
+                            <label for="voucher_max_order_amount">{{ __('Voucher Usage - Exact Subtotal Only') }}</label>
+                            <input type="number" class="form-control" id="voucher_max_order_amount" name="voucher_max_order_amount"
+                                value="{{ setting('voucher_max_order_amount', '0') }}" min="0" step="0.01">
+                            <small class="form-text text-muted">{{ __('Voucher can ONLY be used if the order subtotal is EXACTLY equal to this amount.') }}</small>
+                        </div>
+
+                        {{-- Voucher Expiry Days (number) --}}
+                        <div class="form-group mb-3">
+                            <label for="voucher_expiry_days">{{ __('Voucher Expiry (Days)') }}</label>
+                            <input type="number" class="form-control" id="voucher_expiry_days" name="voucher_expiry_days"
+                                value="{{ setting('voucher_expiry_days') }}" min="1">
+                            <small class="form-text text-muted">{{ __('Number of days the voucher is valid. Leave empty for no expiration.') }}</small>
+                        </div>
                     </div>
                 </div>
             </form>
