@@ -167,14 +167,13 @@
                                     .then(res => res.json())
                                     .then(data => {
                                         if (data.success) {
-                                            const switchType = immediate ? 'immediately' : 'scheduled';
-                                            Swal.fire(
-                                                'Subscribed!',
-                                                `Your subscription has been confirmed and will ${switchType === 'immediately' ? 'start immediately' : 'start after your current subscription ends'}.`,
-                                                'success'
-                                            ).then(() => {
-                                                location.reload();
-                                            });
+                                            const redirectUrl = data?.data?.payment?.redirect_url || null;
+                                            if (redirectUrl) {
+                                                window.location.href = redirectUrl;
+                                                return;
+                                            }
+
+                                            Swal.fire('Done', data.message || 'Payment initiated successfully.', 'success');
                                         } else {
                                             Swal.fire(
                                                 'Error!',
@@ -218,13 +217,13 @@
                                     .then(res => res.json())
                                     .then(data => {
                                         if (data.success) {
-                                            Swal.fire(
-                                                'Subscribed!',
-                                                'Your subscription has been confirmed.',
-                                                'success'
-                                            ).then(() => {
-                                                location.reload();
-                                            });
+                                            const redirectUrl = data?.data?.payment?.redirect_url || null;
+                                            if (redirectUrl) {
+                                                window.location.href = redirectUrl;
+                                                return;
+                                            }
+
+                                            Swal.fire('Done', data.message || 'Payment initiated successfully.', 'success');
                                         } else {
                                             Swal.fire(
                                                 'Error!',

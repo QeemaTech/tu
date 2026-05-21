@@ -11,6 +11,8 @@ class PaymentTransaction extends Model
         'order_id',
         'gateway',
         'payment_method',
+        'context',
+        'context_id',
         'status',
         'amount',
         'currency',
@@ -40,5 +42,10 @@ class PaymentTransaction extends Model
     {
         return $this->belongsTo(Order::class);
     }
-}
 
+    public function subscriptionPaymentRequest(): BelongsTo
+    {
+        return $this->belongsTo(VendorSubscriptionPaymentRequest::class, 'context_id')
+            ->where('context', 'vendor_subscription');
+    }
+}

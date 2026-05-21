@@ -6,6 +6,7 @@ use App\Http\Requests\Admin\Plans\CreateRequest;
 use App\Http\Requests\Admin\Plans\UpdateRequest;
 use App\Models\Plan;
 use App\Services\PlanService;
+use App\Services\VendorSubscriptionPaymentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -14,10 +15,12 @@ use Illuminate\View\View;
 class PlanController extends Controller
 {
     protected PlanService $service;
+    protected VendorSubscriptionPaymentService $vendorSubscriptionPaymentService;
 
-    public function __construct(PlanService $service)
+    public function __construct(PlanService $service, VendorSubscriptionPaymentService $vendorSubscriptionPaymentService)
     {
         $this->service = $service;
+        $this->vendorSubscriptionPaymentService = $vendorSubscriptionPaymentService;
     }
 
     public function index(Request $request): View|JsonResponse
@@ -128,17 +131,32 @@ class PlanController extends Controller
         $request->validate([
             'plan_id' => 'required|exists:plans,id',
             'immediate' => 'sometimes|boolean',
+            'payment_method' => 'sometimes|string|in:paymob',
         ]);
 
         try {
-            $subscription = $this->service->subscribeToPlan([
-                'plan_id' => $request->plan_id,
-                'immediate' => $request->boolean('immediate', true), // Default to true if not provided
-            ]);
+            $paymentMethod = (string) $request->input('payment_method', 'paymob');
+            $result = $this->vendorSubscriptionPaymentService->initiateForUser(
+                user: auth()->user(),
+                planId: (int) $request->plan_id,
+                immediate: $request->boolean('immediate', true),
+                paymentMethod: $paymentMethod
+            );
 
             return response()->json([
                 'success' => true,
-                'message' => __('Subscribed successfully to :plan', ['plan' => $subscription->plan->name]),
+                'message' => $result['already_initiated']
+                    ? __('Payment already initiated for this subscription request.')
+                    : __('Payment initiated successfully.'),
+                'data' => [
+                    'subscription_payment_request_id' => $result['request']->id,
+                    'payment' => [
+                        'gateway' => $result['gateway'],
+                        'status' => $result['result']->status,
+                        'transaction_id' => $result['result']->transactionId,
+                        'redirect_url' => $result['result']->redirectUrl,
+                    ],
+                ],
             ]);
 
         } catch (\Exception $e) {

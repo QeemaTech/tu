@@ -62,6 +62,11 @@ class Vendor extends Model
         return $this->hasMany(VendorSubscription::class);
     }
 
+    public function subscriptionPaymentRequests()
+    {
+        return $this->hasMany(VendorSubscriptionPaymentRequest::class);
+    }
+
     public function activeSubscription()
     {
         $today = now()->startOfDay();

@@ -3,8 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Repositories\PaymentTransactionRepository;
+use App\Repositories\VendorSubscriptionPaymentRequestRepository;
 use App\Services\OrderService;
 use App\Services\Payments\PaymobPaymentService;
+use App\Services\VendorSubscriptionWebhookService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -13,7 +16,10 @@ class PaymentWebhookController extends Controller
 {
     public function __construct(
         protected PaymobPaymentService $paymobPaymentService,
-        protected OrderService $orderService
+        protected OrderService $orderService,
+        protected VendorSubscriptionWebhookService $vendorSubscriptionWebhookService,
+        protected PaymentTransactionRepository $paymentTransactionRepository,
+        protected VendorSubscriptionPaymentRequestRepository $vendorSubscriptionPaymentRequestRepository
     ) {}
 
     public function paymob(Request $request): JsonResponse
@@ -78,12 +84,17 @@ class PaymentWebhookController extends Controller
             'payment_status' => (string) ($verification->paymentStatus ?? 'pending'),
         ]);
 
+        $handler = $this->resolveHandler($normalized);
+
         try {
-            $result = $this->orderService->processGatewayWebhook('paymob', $normalized);
+            $result = $handler === 'vendor_subscription'
+                ? $this->vendorSubscriptionWebhookService->processGatewayWebhook('paymob', $normalized)
+                : $this->orderService->processGatewayWebhook('paymob', $normalized);
         } catch (\Throwable $e) {
             Log::error('Paymob webhook processing failed', [
                 'error' => $e->getMessage(),
                 'normalized' => $normalized,
+                'handler' => $handler,
             ]);
 
             return response()->json([
@@ -92,7 +103,7 @@ class PaymentWebhookController extends Controller
             ], 422);
         }
 
-        Log::info('Paymob webhook processed', $result);
+        Log::info('Paymob webhook processed', array_merge($result, ['handler' => $handler]));
 
         return response()->json([
             'success' => true,
@@ -118,5 +129,52 @@ class PaymentWebhookController extends Controller
         }
 
         return $flat;
+    }
+
+    /**
+     * @param  array<string, mixed>  $normalized
+     */
+    private function resolveHandler(array $normalized): string
+    {
+        $externalReference = (string) ($normalized['external_reference'] ?? '');
+        if ($externalReference !== '' && preg_match('/^subpay-\d+$/i', $externalReference) === 1) {
+            return 'vendor_subscription';
+        }
+
+        $gateway = (string) ($normalized['gateway'] ?? 'paymob');
+        $externalTransactionId = (string) ($normalized['external_transaction_id'] ?? '');
+        $externalOrderId = (string) ($normalized['external_order_id'] ?? '');
+        $merchantOrderId = (string) ($normalized['merchant_order_id'] ?? '');
+
+        if ($externalTransactionId !== '') {
+            $transaction = $this->paymentTransactionRepository->findByGatewayAndExternalTransactionId($gateway, $externalTransactionId);
+            if ($transaction && $transaction->context === 'vendor_subscription') {
+                return 'vendor_subscription';
+            }
+        }
+
+        if ($externalOrderId !== '') {
+            $transaction = $this->paymentTransactionRepository->findByExternalOrderId($gateway, $externalOrderId);
+            if ($transaction && $transaction->context === 'vendor_subscription') {
+                return 'vendor_subscription';
+            }
+        }
+
+        if ($externalReference !== '') {
+            $transaction = $this->paymentTransactionRepository->findByExternalReference($gateway, $externalReference);
+            if ($transaction && $transaction->context === 'vendor_subscription') {
+                return 'vendor_subscription';
+            }
+        }
+
+        // Legacy Paymob fallback: merchant_order_id can be "{requestId}-{random}".
+        if ($merchantOrderId !== '' && preg_match('/^(\d+)-/i', $merchantOrderId, $matches) === 1) {
+            $request = $this->vendorSubscriptionPaymentRequestRepository->findById((int) $matches[1]);
+            if ($request) {
+                return 'vendor_subscription';
+            }
+        }
+
+        return 'order';
     }
 }

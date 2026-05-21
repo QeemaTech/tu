@@ -33,6 +33,23 @@ class PaymentTransactionRepository
             ->first();
     }
 
+    /**
+     * @param  array<int, string>  $statuses
+     */
+    public function findLatestByContextAndGateway(string $context, int $contextId, string $gateway, array $statuses = []): ?PaymentTransaction
+    {
+        $query = $this->model->newQuery()
+            ->where('context', $context)
+            ->where('context_id', $contextId)
+            ->where('gateway', $gateway);
+
+        if ($statuses !== []) {
+            $query->whereIn('status', $statuses);
+        }
+
+        return $query->latest('id')->first();
+    }
+
     public function findByExternalOrderId(string $gateway, string $externalOrderId): ?PaymentTransaction
     {
         return $this->model->newQuery()
