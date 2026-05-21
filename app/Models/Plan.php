@@ -60,4 +60,9 @@ class Plan extends Model
     {
         return $query->where('is_featured', true);
     }
+
+    public function subscriptionPaymentRequests()
+    {
+        return $this->hasMany(VendorSubscriptionPaymentRequest::class);
+    }
 }

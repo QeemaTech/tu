@@ -28,6 +28,11 @@ class VendorSubscription extends Model
         return $this->belongsTo(Plan::class);
     }
 
+    public function paymentRequests()
+    {
+        return $this->hasMany(VendorSubscriptionPaymentRequest::class, 'current_subscription_id');
+    }
+
     /**
      * Scope a query to only include active subscriptions
      */
