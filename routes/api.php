@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\DeliveryController;
 use App\Http\Controllers\Api\OrderController;
 use App\Http\Controllers\Api\OrderRefundController;
 use App\Http\Controllers\Api\PasswordController;
+use App\Http\Controllers\Api\PaymentWebhookController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\RatingController;
@@ -52,6 +53,11 @@ Route::post('/auth/reset-password/verify-code', [ResetPasswordController::class,
 Route::post('/auth/reset-password/set-new-password', [ResetPasswordController::class, 'resetPasswordSetNewPassword'])
     ->middleware('throttle:5,1')
     ->name('api.reset-password.set-new-password');
+
+// Payment webhooks (public)
+Route::post('/payments/webhooks/paymob', [PaymentWebhookController::class, 'paymob'])
+    ->middleware('throttle:60,1')
+    ->name('api.payments.webhooks.paymob');
 
 // User
 Route::group(['middleware' => 'locale'], function () {

@@ -8,6 +8,7 @@ use App\Models\Coupon;
 use App\Services\OrderService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use InvalidArgumentException;
 use Illuminate\Support\Facades\Auth;
 
 class OrderController extends Controller
@@ -218,7 +219,82 @@ class OrderController extends Controller
             'payment_method' => ['required', 'string', 'max:50'],
         ]);
 
-        $order = $this->service->payOrderImmediatelyForUser($id, $user->id, (string) $validated['payment_method']);
+        $paymentMethod = strtolower((string) $validated['payment_method']);
+
+        if ($paymentMethod === 'paymob') {
+            try {
+                $payment = $this->service->initiateGatewayPaymentForUser($id, $user->id, $paymentMethod);
+            } catch (InvalidArgumentException $e) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $e->getMessage(),
+                ], 422);
+            }
+
+            if (! $payment) {
+                return response()->json([
+                    'success' => false,
+                    'message' => __('Order not found.'),
+                ], 404);
+            }
+
+            if ($payment['already_paid']) {
+                return response()->json([
+                    'success' => true,
+                    'message' => __('Order already paid.'),
+                    'data' => new OrderResource($payment['order']),
+                ]);
+            }
+
+            if ($payment['already_initiated']) {
+                /** @var \App\Data\Payments\PaymentInitiationResult $result */
+                $result = $payment['result'];
+
+                return response()->json([
+                    'success' => true,
+                    'message' => __('Payment already initiated for this order.'),
+                    'data' => [
+                        'order' => new OrderResource($payment['order']),
+                        'payment' => [
+                            'gateway' => $payment['gateway'],
+                            'status' => $result->status,
+                            'transaction_id' => $result->transactionId,
+                            'redirect_url' => $result->redirectUrl,
+                        ],
+                    ],
+                ]);
+            }
+
+            /** @var \App\Data\Payments\PaymentInitiationResult $result */
+            $result = $payment['result'];
+
+            if (! $result->success) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $result->message ?? __('Unable to initiate payment.'),
+                    'data' => [
+                        'gateway' => $payment['gateway'],
+                        'status' => $result->status,
+                    ],
+                ], 422);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => __('Payment initiated successfully.'),
+                'data' => [
+                    'order' => new OrderResource($payment['order']),
+                    'payment' => [
+                        'gateway' => $payment['gateway'],
+                        'status' => $result->status,
+                        'transaction_id' => $result->transactionId,
+                        'redirect_url' => $result->redirectUrl,
+                    ],
+                ],
+            ]);
+        }
+
+        $order = $this->service->payOrderImmediatelyForUser($id, $user->id, $paymentMethod);
 
         if (! $order) {
             return response()->json([

@@ -20,13 +20,17 @@ use App\Notifications\NewOrderForAdminNotification;
 use App\Notifications\NewVendorOrderNotification;
 use App\Notifications\OrderPlacedNotification;
 use App\Notifications\OrderStatusUpdatedNotification;
+use App\Contracts\Payments\PaymentGatewayResolverInterface;
+use App\Data\Payments\PaymentInitiationResult;
 use App\Repositories\CartRepository;
 use App\Repositories\OrderRepository;
+use App\Repositories\PaymentTransactionRepository;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use RuntimeException;
 
 class OrderService
 {
@@ -35,7 +39,9 @@ class OrderService
         protected CartRepository $cartRepository,
         protected CartService $cartService,
         protected NotificationService $notificationService,
-        protected InventoryAlertService $inventoryAlertService
+        protected InventoryAlertService $inventoryAlertService,
+        protected PaymentGatewayResolverInterface $paymentGatewayResolver,
+        protected PaymentTransactionRepository $paymentTransactionRepository
     ) {}
 
     /**
@@ -78,6 +84,277 @@ class OrderService
         }
 
         return $this->payOrderImmediately($order, $paymentMethod, $userId);
+    }
+
+    /**
+     * Initiate external payment for an order.
+     *
+     * @return array{order: Order, result: PaymentInitiationResult, gateway: string, already_paid: bool, already_initiated: bool}|null
+     */
+    public function initiateGatewayPaymentForUser(int $orderId, int $userId, string $paymentMethod): ?array
+    {
+        return DB::transaction(function () use ($orderId, $userId, $paymentMethod) {
+            $order = Order::query()
+                ->where('id', $orderId)
+                ->where('user_id', $userId)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $order) {
+                return null;
+            }
+
+            if ($order->payment_status === 'paid') {
+                return [
+                    'order' => $order,
+                    'result' => new PaymentInitiationResult(
+                        success: true,
+                        status: 'already_paid',
+                        message: 'Order already paid.',
+                    ),
+                    'gateway' => strtolower(trim($paymentMethod)),
+                    'already_paid' => true,
+                    'already_initiated' => false,
+                ];
+            }
+
+            $gateway = $this->paymentGatewayResolver->resolve($paymentMethod);
+            $activeTransaction = \App\Models\PaymentTransaction::query()
+                ->where('order_id', $order->id)
+                ->where('gateway', $gateway->code())
+                ->whereIn('status', ['initiated', 'pending'])
+                ->latest('id')
+                ->first();
+
+            if ($activeTransaction) {
+                return [
+                    'order' => $order,
+                    'result' => new PaymentInitiationResult(
+                        success: true,
+                        status: 'already_initiated',
+                        transactionId: $activeTransaction->external_transaction_id,
+                        redirectUrl: is_array($activeTransaction->meta) ? ($activeTransaction->meta['redirect_url'] ?? null) : null,
+                        clientSecret: null,
+                        payload: [],
+                        message: 'Payment already initiated for this order.',
+                    ),
+                    'gateway' => $gateway->code(),
+                    'already_paid' => false,
+                    'already_initiated' => true,
+                ];
+            }
+
+            $result = $gateway->initiate($order, [
+                'currency' => (string) config('services.paymob.default_currency', 'EGP'),
+                'reference' => 'order-'.$order->id,
+            ]);
+            $safePayload = $this->sanitizePaymentPayload($result->payload);
+
+            $this->paymentTransactionRepository->create([
+                'order_id' => $order->id,
+                'gateway' => $gateway->code(),
+                'payment_method' => $paymentMethod,
+                'status' => $result->status,
+                'amount' => (float) $order->total,
+                'currency' => (string) config('services.paymob.default_currency', 'EGP'),
+                'external_transaction_id' => $result->transactionId,
+                'external_reference' => 'order-'.$order->id,
+                'request_payload' => [
+                    'payment_method' => $paymentMethod,
+                    'reference' => 'order-'.$order->id,
+                ],
+                'response_payload' => $safePayload,
+                'failure_reason' => $result->success ? null : $result->message,
+                'meta' => [
+                    'redirect_url' => $result->redirectUrl,
+                ],
+            ]);
+
+            return [
+                'order' => $order->fresh(),
+                'result' => new PaymentInitiationResult(
+                    success: $result->success,
+                    status: $result->status,
+                    transactionId: $result->transactionId,
+                    redirectUrl: $result->redirectUrl,
+                    clientSecret: null,
+                    payload: $safePayload,
+                    message: $result->message,
+                ),
+                'gateway' => $gateway->code(),
+                'already_paid' => false,
+                'already_initiated' => false,
+            ];
+        });
+    }
+
+    /**
+     * Process a verified gateway webhook payload and update order/payment state safely.
+     *
+     * @param  array<string, mixed>  $normalized
+     * @return array{order_id:int,status:string,idempotent:bool,transaction_id:int|null}
+     */
+    public function processGatewayWebhook(string $gateway, array $normalized): array
+    {
+        return DB::transaction(function () use ($gateway, $normalized) {
+            $externalTransactionId = (string) ($normalized['external_transaction_id'] ?? '');
+            $externalOrderId = (string) ($normalized['external_order_id'] ?? '');
+            $merchantOrderId = (string) ($normalized['merchant_order_id'] ?? '');
+            $externalReference = (string) ($normalized['external_reference'] ?? '');
+            $paymentStatus = (string) ($normalized['payment_status'] ?? 'pending');
+            $currency = (string) ($normalized['currency'] ?? config('services.paymob.default_currency', 'EGP'));
+            $amount = round(((float) ($normalized['amount_cents'] ?? 0)) / 100, 2);
+            $rawPayload = is_array($normalized['raw'] ?? null) ? $normalized['raw'] : [];
+
+            $paymentTransaction = null;
+            if ($externalTransactionId !== '') {
+                $paymentTransaction = $this->paymentTransactionRepository->findByGatewayAndExternalTransactionId($gateway, $externalTransactionId);
+            }
+
+            if (! $paymentTransaction && $externalOrderId !== '') {
+                $paymentTransaction = $this->paymentTransactionRepository->findByExternalOrderId($gateway, $externalOrderId);
+            }
+
+            if (! $paymentTransaction && $externalReference !== '') {
+                $paymentTransaction = $this->paymentTransactionRepository->findByExternalReference($gateway, $externalReference);
+            }
+
+            $orderId = $paymentTransaction?->order_id
+                ?? $this->resolveOrderIdFromWebhook($merchantOrderId, $externalReference, $externalOrderId);
+
+            if (! $orderId) {
+                throw new RuntimeException('Unable to resolve order from gateway webhook payload.');
+            }
+
+            $order = Order::query()->lockForUpdate()->find($orderId);
+            if (! $order) {
+                throw new RuntimeException('Order not found for gateway webhook processing.');
+            }
+
+            if (! $paymentTransaction) {
+                $paymentTransaction = $this->paymentTransactionRepository->create([
+                    'order_id' => $order->id,
+                    'gateway' => $gateway,
+                    'payment_method' => $gateway,
+                    'status' => $paymentStatus,
+                    'amount' => $amount > 0 ? $amount : (float) $order->total,
+                    'currency' => $currency,
+                    'external_transaction_id' => $externalTransactionId !== '' ? $externalTransactionId : null,
+                    'external_order_id' => $externalOrderId !== '' ? $externalOrderId : null,
+                    'external_reference' => $externalReference !== '' ? $externalReference : null,
+                    'webhook_payload' => $rawPayload,
+                ]);
+            }
+
+            if ($paymentStatus === 'paid' && $order->payment_status === 'paid') {
+                return [
+                    'order_id' => (int) $order->id,
+                    'status' => 'paid',
+                    'idempotent' => true,
+                    'transaction_id' => (int) $paymentTransaction->id,
+                ];
+            }
+
+            $this->paymentTransactionRepository->update($paymentTransaction, [
+                'status' => $paymentStatus,
+                'external_transaction_id' => $externalTransactionId !== '' ? $externalTransactionId : $paymentTransaction->external_transaction_id,
+                'external_order_id' => $externalOrderId !== '' ? $externalOrderId : $paymentTransaction->external_order_id,
+                'external_reference' => $externalReference !== '' ? $externalReference : $paymentTransaction->external_reference,
+                'webhook_payload' => $rawPayload,
+                'paid_at' => $paymentStatus === 'paid' ? now() : $paymentTransaction->paid_at,
+                'refunded_at' => $paymentStatus === 'refunded' ? now() : $paymentTransaction->refunded_at,
+                'failure_reason' => $paymentStatus === 'failed' ? 'Gateway payment failed.' : $paymentTransaction->failure_reason,
+            ]);
+
+            if ($paymentStatus === 'paid') {
+                $this->payOrderImmediately($order, $gateway, null);
+            } elseif ($paymentStatus === 'failed' && $order->payment_status === 'pending') {
+                $order->payment_status = 'failed';
+                $order->payment_method = $gateway;
+                $order->save();
+
+                OrderLog::create([
+                    'order_id' => $order->id,
+                    'vendor_order_id' => null,
+                    'user_id' => null,
+                    'type' => 'payment_change',
+                    'from_status' => 'pending',
+                    'to_status' => 'failed',
+                    'payload' => [
+                        'payment_method' => $gateway,
+                        'source' => 'webhook',
+                    ],
+                ]);
+            } elseif ($paymentStatus === 'refunded' && $order->payment_status === 'paid') {
+                $order->payment_status = 'refunded';
+                $order->save();
+            }
+
+            return [
+                'order_id' => (int) $order->id,
+                'status' => $paymentStatus,
+                'idempotent' => false,
+                'transaction_id' => (int) $paymentTransaction->id,
+            ];
+        });
+    }
+
+    private function resolveOrderIdFromWebhook(string $merchantOrderId, string $externalReference, string $externalOrderId): ?int
+    {
+        if ($merchantOrderId !== '' && ctype_digit($merchantOrderId)) {
+            return (int) $merchantOrderId;
+        }
+
+        if ($merchantOrderId !== '' && preg_match('/^(\d+)-/i', $merchantOrderId, $matches) === 1) {
+            return (int) $matches[1];
+        }
+
+        if ($externalReference !== '' && preg_match('/order-(\d+)/i', $externalReference, $matches) === 1) {
+            return (int) $matches[1];
+        }
+
+        if ($externalOrderId !== '' && ctype_digit($externalOrderId)) {
+            $candidate = (int) $externalOrderId;
+            if (Order::query()->whereKey($candidate)->exists()) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Remove sensitive gateway secrets before persisting or returning payloads.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function sanitizePaymentPayload(array $payload): array
+    {
+        $sensitiveKeys = [
+            'token',
+            'payment_key',
+            'client_secret',
+            'auth_token',
+        ];
+
+        $walk = function ($value) use (&$walk, $sensitiveKeys) {
+            if (! is_array($value)) {
+                return $value;
+            }
+
+            foreach ($value as $key => $item) {
+                if (is_string($key) && in_array(strtolower($key), $sensitiveKeys, true)) {
+                    $value[$key] = '[REDACTED]';
+                    continue;
+                }
+                $value[$key] = $walk($item);
+            }
+
+            return $value;
+        };
+
+        return $walk($payload);
     }
 
     public function payOrderImmediately(Order $order, string $paymentMethod, ?int $actorUserId = null): Order
