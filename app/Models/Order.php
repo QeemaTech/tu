@@ -90,6 +90,11 @@ class Order extends Model
         return $this->hasMany(DeliveryAssignment::class);
     }
 
+    public function paymentTransactions(): HasMany
+    {
+        return $this->hasMany(PaymentTransaction::class);
+    }
+
     /**
      * Get all vendor order items that belong to this order.
      */

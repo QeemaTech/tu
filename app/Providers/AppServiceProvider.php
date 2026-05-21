@@ -2,7 +2,10 @@
 
 namespace App\Providers;
 
+use App\Contracts\Payments\PaymentGatewayResolverInterface;
 use App\Models\VendorUser;
+use App\Services\Payments\PaymentGatewayResolver;
+use App\Services\Payments\PaymobPaymentService;
 use App\Models\Verification;
 use App\View\Composers\SidebarComposer;
 use Illuminate\Auth\Notifications\VerifyEmail;
@@ -18,7 +21,13 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->singleton(PaymobPaymentService::class);
+
+        $this->app->bind(PaymentGatewayResolverInterface::class, function () {
+            return new PaymentGatewayResolver([
+                $this->app->make(PaymobPaymentService::class),
+            ]);
+        });
     }
 
     /**
