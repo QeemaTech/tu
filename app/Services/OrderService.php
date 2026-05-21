@@ -158,6 +158,7 @@ class OrderService
                 'amount' => (float) $order->total,
                 'currency' => (string) config('services.paymob.default_currency', 'EGP'),
                 'external_transaction_id' => $result->transactionId,
+                'external_order_id' => $this->extractExternalOrderIdFromInitiationPayload($result->payload),
                 'external_reference' => 'order-'.$order->id,
                 'request_payload' => [
                     'payment_method' => $paymentMethod,
@@ -229,6 +230,16 @@ class OrderService
             $order = Order::query()->lockForUpdate()->find($orderId);
             if (! $order) {
                 throw new RuntimeException('Order not found for gateway webhook processing.');
+            }
+
+            if (! $paymentTransaction) {
+                // Fallback: update existing active initiation for this order+gateway.
+                $paymentTransaction = \App\Models\PaymentTransaction::query()
+                    ->where('order_id', $order->id)
+                    ->where('gateway', $gateway)
+                    ->whereIn('status', ['initiated', 'pending'])
+                    ->latest('id')
+                    ->first();
             }
 
             if (! $paymentTransaction) {
@@ -321,6 +332,22 @@ class OrderService
         }
 
         return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function extractExternalOrderIdFromInitiationPayload(array $payload): ?string
+    {
+        $orderId = data_get($payload, 'order.id')
+            ?? data_get($payload, 'order_id')
+            ?? data_get($payload, 'id');
+
+        if ($orderId === null || $orderId === '') {
+            return null;
+        }
+
+        return (string) $orderId;
     }
 
     /**
